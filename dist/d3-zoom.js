@@ -109,7 +109,10 @@ function defaultTransform() {
 function defaultWheelDelta(event) {
 
   let multiplier = event.deltaMode ? 1 : 0.002;
-  multiplier = event.deltaMode === 1 ? 0.05 : multiplier;
+
+  if (event.deltaMode === 1) {
+    multiplier = 0.05;
+  }
 
   return -event.deltaY * multiplier * (event.ctrlKey ? 10 : 1);
 }

@@ -1,12 +1,87 @@
-import {dispatch} from "d3-dispatch";
-import {dragDisable, dragEnable} from "d3-drag";
-import {interpolateZoom} from "d3-interpolate";
-import {select, pointer} from "d3-selection";
-import {interrupt} from "d3-transition";
-import constant from "./constant.js";
-import ZoomEvent from "./event.js";
-import {Transform, identity} from "./transform.js";
-import noevent, {nopropagation} from "./noevent.js";
+// https://d3js.org/d3-zoom/ v3.0.0 Copyright 2010-2021 Mike Bostock
+(function (global, factory) {
+typeof exports === 'object' && typeof module !== 'undefined' ? factory(exports, require('d3-dispatch'), require('d3-drag'), require('d3-interpolate'), require('d3-selection'), require('d3-transition')) :
+typeof define === 'function' && define.amd ? define(['exports', 'd3-dispatch', 'd3-drag', 'd3-interpolate', 'd3-selection', 'd3-transition'], factory) :
+(global = typeof globalThis !== 'undefined' ? globalThis : global || self, factory(global.d3 = global.d3 || {}, global.d3, global.d3, global.d3, global.d3, global.d3));
+}(this, (function (exports, d3Dispatch, d3Drag, d3Interpolate, d3Selection, d3Transition) { 'use strict';
+
+var constant = x => () => x;
+
+function ZoomEvent(type, {
+  sourceEvent,
+  target,
+  transform,
+  dispatch
+}) {
+  Object.defineProperties(this, {
+    type: {value: type, enumerable: true, configurable: true},
+    sourceEvent: {value: sourceEvent, enumerable: true, configurable: true},
+    target: {value: target, enumerable: true, configurable: true},
+    transform: {value: transform, enumerable: true, configurable: true},
+    _: {value: dispatch}
+  });
+}
+
+function Transform(k, x, y) {
+  this.k = k;
+  this.x = x;
+  this.y = y;
+}
+
+Transform.prototype = {
+  constructor: Transform,
+  scale: function(k) {
+    return k === 1 ? this : new Transform(this.k * k, this.x, this.y);
+  },
+  translate: function(x, y) {
+    return x === 0 & y === 0 ? this : new Transform(this.k, this.x + this.k * x, this.y + this.k * y);
+  },
+  apply: function(point) {
+    return [point[0] * this.k + this.x, point[1] * this.k + this.y];
+  },
+  applyX: function(x) {
+    return x * this.k + this.x;
+  },
+  applyY: function(y) {
+    return y * this.k + this.y;
+  },
+  invert: function(location) {
+    return [(location[0] - this.x) / this.k, (location[1] - this.y) / this.k];
+  },
+  invertX: function(x) {
+    return (x - this.x) / this.k;
+  },
+  invertY: function(y) {
+    return (y - this.y) / this.k;
+  },
+  rescaleX: function(x) {
+    return x.copy().domain(x.range().map(this.invertX, this).map(x.invert, x));
+  },
+  rescaleY: function(y) {
+    return y.copy().domain(y.range().map(this.invertY, this).map(y.invert, y));
+  },
+  toString: function() {
+    return "translate(" + this.x + "," + this.y + ") scale(" + this.k + ")";
+  }
+};
+
+var identity = new Transform(1, 0, 0);
+
+transform.prototype = Transform.prototype;
+
+function transform(node) {
+  while (!node.__zoom) if (!(node = node.parentNode)) return identity;
+  return node.__zoom;
+}
+
+function nopropagation(event) {
+  event.stopImmediatePropagation();
+}
+
+function noevent(event) {
+  event.preventDefault();
+  event.stopImmediatePropagation();
+}
 
 // Ignore right-click, since that should open the context menu.
 // except for pinch-to-zoom, which is sent as a wheel+ctrlKey event
@@ -54,7 +129,7 @@ function defaultConstrain(transform, extent, translateExtent) {
   );
 }
 
-export default function() {
+function zoom() {
   var filter = defaultFilter,
       extent = defaultExtent,
       constrain = defaultConstrain,
@@ -63,8 +138,8 @@ export default function() {
       scaleExtent = [0, Infinity],
       translateExtent = [[-Infinity, -Infinity], [Infinity, Infinity]],
       duration = 250,
-      interpolate = interpolateZoom,
-      listeners = dispatch("start", "zoom", "end"),
+      interpolate = d3Interpolate.interpolateZoom,
+      listeners = d3Dispatch.dispatch("start", "zoom", "end"),
       touchstarting,
       touchfirst,
       touchending,
@@ -219,7 +294,7 @@ export default function() {
       return this;
     },
     emit: function(type) {
-      var d = select(this.that).datum();
+      var d = d3Selection.select(this.that).datum();
       listeners.call(
         type,
         this.that,
@@ -240,7 +315,7 @@ export default function() {
     var g = gesture(this, args).event(event),
         t = this.__zoom,
         k = Math.max(scaleExtent[0], Math.min(scaleExtent[1], t.k * Math.pow(2, wheelDelta.apply(this, arguments)))),
-        p = pointer(event);
+        p = d3Selection.pointer(event);
 
     // If the mouse is in the same location as before, reuse it.
     // If there were recent wheel events, reset the wheel idle timeout.
@@ -257,7 +332,7 @@ export default function() {
     // Otherwise, capture the mouse point and location at the start.
     else {
       g.mouse = [p, t.invert(p)];
-      interrupt(this);
+      d3Transition.interrupt(this);
       g.start();
     }
 
@@ -275,15 +350,15 @@ export default function() {
     if (touchending || !filter.apply(this, arguments)) return;
     var currentTarget = event.currentTarget,
         g = gesture(this, args, true).event(event),
-        v = select(event.view).on("mousemove.zoom", mousemoved, true).on("mouseup.zoom", mouseupped, true),
-        p = pointer(event, currentTarget),
+        v = d3Selection.select(event.view).on("mousemove.zoom", mousemoved, true).on("mouseup.zoom", mouseupped, true),
+        p = d3Selection.pointer(event, currentTarget),
         x0 = event.clientX,
         y0 = event.clientY;
 
-    dragDisable(event.view);
+    d3Drag.dragDisable(event.view);
     nopropagation(event);
     g.mouse = [p, this.__zoom.invert(p)];
-    interrupt(this);
+    d3Transition.interrupt(this);
     g.start();
 
     function mousemoved(event) {
@@ -293,12 +368,12 @@ export default function() {
         g.moved = dx * dx + dy * dy > clickDistance2;
       }
       g.event(event)
-       .zoom("mouse", constrain(translate(g.that.__zoom, g.mouse[0] = pointer(event, currentTarget), g.mouse[1]), g.extent, translateExtent));
+       .zoom("mouse", constrain(translate(g.that.__zoom, g.mouse[0] = d3Selection.pointer(event, currentTarget), g.mouse[1]), g.extent, translateExtent));
     }
 
     function mouseupped(event) {
       v.on("mousemove.zoom mouseup.zoom", null);
-      dragEnable(event.view, g.moved);
+      d3Drag.dragEnable(event.view, g.moved);
       noevent(event);
       g.event(event).end();
     }
@@ -307,14 +382,14 @@ export default function() {
   function dblclicked(event, ...args) {
     if (!filter.apply(this, arguments)) return;
     var t0 = this.__zoom,
-        p0 = pointer(event.changedTouches ? event.changedTouches[0] : event, this),
+        p0 = d3Selection.pointer(event.changedTouches ? event.changedTouches[0] : event, this),
         p1 = t0.invert(p0),
         k1 = t0.k * (event.shiftKey ? 0.5 : 2),
         t1 = constrain(translate(scale(t0, k1), p0, p1), extent.apply(this, args), translateExtent);
 
     noevent(event);
-    if (duration > 0) select(this).transition().duration(duration).call(schedule, t1, p0, event);
-    else select(this).call(zoom.transform, t1, p0, event);
+    if (duration > 0) d3Selection.select(this).transition().duration(duration).call(schedule, t1, p0, event);
+    else d3Selection.select(this).call(zoom.transform, t1, p0, event);
   }
 
   function touchstarted(event, ...args) {
@@ -326,7 +401,7 @@ export default function() {
 
     nopropagation(event);
     for (i = 0; i < n; ++i) {
-      t = touches[i], p = pointer(t, this);
+      t = touches[i], p = d3Selection.pointer(t, this);
       p = [p, this.__zoom.invert(p), t.identifier];
       if (!g.touch0) g.touch0 = p, started = true, g.taps = 1 + !!touchstarting;
       else if (!g.touch1 && g.touch0[2] !== p[2]) g.touch1 = p, g.taps = 0;
@@ -336,7 +411,7 @@ export default function() {
 
     if (started) {
       if (g.taps < 2) touchfirst = p[0], touchstarting = setTimeout(function() { touchstarting = null; }, touchDelay);
-      interrupt(this);
+      d3Transition.interrupt(this);
       g.start();
     }
   }
@@ -349,7 +424,7 @@ export default function() {
 
     noevent(event);
     for (i = 0; i < n; ++i) {
-      t = touches[i], p = pointer(t, this);
+      t = touches[i], p = d3Selection.pointer(t, this);
       if (g.touch0 && g.touch0[2] === t.identifier) g.touch0[0] = p;
       else if (g.touch1 && g.touch1[2] === t.identifier) g.touch1[0] = p;
     }
@@ -389,9 +464,9 @@ export default function() {
       g.end();
       // If this was a dbltap, reroute to the (optional) dblclick.zoom handler.
       if (g.taps === 2) {
-        t = pointer(t, this);
+        t = d3Selection.pointer(t, this);
         if (Math.hypot(touchfirst[0] - t[0], touchfirst[1] - t[1]) < tapDistance) {
-          var p = select(this).on("dblclick.zoom");
+          var p = d3Selection.select(this).on("dblclick.zoom");
           if (p) p.apply(this, arguments);
         }
       }
@@ -449,3 +524,12 @@ export default function() {
 
   return zoom;
 }
+
+exports.ZoomTransform = Transform;
+exports.zoom = zoom;
+exports.zoomIdentity = identity;
+exports.zoomTransform = transform;
+
+Object.defineProperty(exports, '__esModule', { value: true });
+
+})));
